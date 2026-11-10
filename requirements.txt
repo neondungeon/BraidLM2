@@ -1,0 +1,9 @@
+# BraidLM dependencies
+# GUI framework (same as nocolour/Ollama-Desktop)
+PySide6>=6.4.0
+
+# Ollama Python client — wraps the local Ollama REST API
+ollama>=0.2.0
+
+# Syntax highlighting for code blocks in the chat renderer
+pygments>=2.15.0
