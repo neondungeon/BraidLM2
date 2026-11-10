@@ -1,23 +1,13 @@
 """
-renderer.py — BraidLM markdown → HTML converter
+renderer.py: BraidLM markdown to HTML converter
 ================================================
 Converts the model's markdown output to styled HTML for display
 inside a QTextBrowser widget.
-
-Strategy
---------
-• Code blocks (``` … ```) are handed to Pygments for syntax highlighting
-  using the Monokai colour scheme.
-• Prose is handled with lightweight regex transforms (headers, bold,
-  italic, inline code) — no heavy dependency like python-markdown needed.
-• The result is wrapped in a full <html> page with embedded CSS that
-  matches the BraidLM dark-purple theme.
-
-Dependencies: pygments (already in requirements.txt)
 """
 
 import html
 import re
+from dataclasses import dataclass
 from typing import Callable
 
 from pygments import highlight
@@ -33,7 +23,7 @@ _PYGMENTS_CSS: str = _FMT.get_style_defs(".highlight")
 _CODE_BLOCK   = re.compile(r"```(\w*)\n?(.*?)```",           re.DOTALL)
 _HEADER       = re.compile(r"^(#{1,6})\s+(.+)$",            re.MULTILINE)
 _BOLD         = re.compile(r"\*\*(.+?)\*\*",                 re.DOTALL)
-_ITALIC       = re.compile(r"\*(.+?)\*")
+_ITALIC       = re.compile(r"\*(?=\S)(.+?)(?<=\S)\*")
 _INLINE_CODE  = re.compile(r"`([^`]+)`")
 _LIST_ITEM    = re.compile(r"^[ \t]*[-*]\s+(.+)$",          re.MULTILINE)
 _ORDERED_ITEM = re.compile(r"^[ \t]*\d+\.\s+(.+)$",         re.MULTILINE)
@@ -41,15 +31,36 @@ _ORDERED_ITEM = re.compile(r"^[ \t]*\d+\.\s+(.+)$",         re.MULTILINE)
 
 # ── Core public API ─────────────────────────────────────────────────────────
 
-def markdown_to_html(text: str) -> str:
+@dataclass
+class CodeBlock:
+    lang: str
+    code: str
+
+
+def extract_code_blocks(text: str) -> list[CodeBlock]:
+    """Fenced code blocks in document order (same rule the renderer uses)."""
+    return [CodeBlock(m.group(1).strip(), m.group(2)) for m in _CODE_BLOCK.finditer(text)]
+
+
+def close_open_fence(text: str) -> str:
+    """A stopped/streamed answer may end inside a code fence; close it so it renders."""
+    if text.count("```") % 2 == 1:
+        return text.rstrip("\n") + "\n```"
+    return text
+
+
+def markdown_to_html(text: str, block_actions: Callable[[int], str] | None = None) -> str:
     """
     Convert a markdown string to an HTML fragment (no <html>/<body> wrapper).
     Code blocks are syntax-highlighted; prose gets basic inline formatting.
+
+    ``block_actions(i)`` may return extra HTML (e.g. Copy / Apply links) that is
+    placed under the i-th code block.
     """
     parts: list[str] = []
     last = 0
 
-    for m in _CODE_BLOCK.finditer(text):
+    for idx, m in enumerate(_CODE_BLOCK.finditer(text)):
         # Prose before this code block
         before = text[last:m.start()]
         if before.strip():
@@ -59,6 +70,10 @@ def markdown_to_html(text: str) -> str:
         lang = m.group(1).strip()
         code = m.group(2)
         parts.append(_highlight_block(code, lang))
+        if block_actions:
+            extra = block_actions(idx)
+            if extra:
+                parts.append(f'<p class="actions">{extra}</p>')
         last = m.end()
 
     # Remaining prose after the last code block
@@ -67,6 +82,19 @@ def markdown_to_html(text: str) -> str:
         parts.append(_prose_to_html(tail))
 
     return "".join(parts)
+
+
+def thinking_html(text: str) -> str:
+    """Dimmed block for a reasoning model's chain of thought."""
+    esc = html.escape(text.strip()).replace("\n", "<br>")
+    return (f'<div class="thinking"><span style="color:#7a7aa8;font-size:11px;">💭 Thinking</span><br>'
+            f'<span style="color:#8a8ab0;font-style:italic;">{esc}</span></div>')
+
+
+def image_html(url: str, caption: str, open_href: str, width: int = 420) -> str:
+    return (f'<p><img src="{html.escape(url)}" width="{width}"><br>'
+            f'<span style="color:#9090b8;font-size:11px;">{html.escape(caption)}</span> &nbsp; '
+            f'<a href="{html.escape(open_href)}" style="color:#8b7cf5;">Open / save…</a></p>')
 
 
 def full_page_html(body: str) -> str:
@@ -111,6 +139,9 @@ code {{
     overflow-x: auto;
 }}
 .highlight {{ background: #272822; }}
+.actions {{ margin: 0 0 10px; font-size: 11px; color: #636390; }}
+.actions a {{ color: #8b7cf5; text-decoration: none; }}
+.thinking {{ margin: 4px 0 8px; padding-left: 8px; border-left: 2px solid #3a3a60; }}
 pre {{ margin: 0; padding: 10px 12px; overflow-x: auto; }}
 /* ── Pygments token colours ── */
 {_PYGMENTS_CSS}

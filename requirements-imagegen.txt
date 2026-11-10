@@ -1,0 +1,8 @@
+# OPTIONAL: local image generation from Hugging Face diffusers models.
+# On Windows/Linux with an NVIDIA GPU, install the CUDA build of PyTorch FIRST
+# (https://pytorch.org/get-started/locally/) - the default Windows wheel on PyPI is CPU-only.
+torch
+diffusers>=0.30
+transformers
+accelerate
+safetensors
